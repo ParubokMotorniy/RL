@@ -6,7 +6,7 @@ globals[
   try-number
   success-number
   epoch
-  emulation-heading
+  walkable-patches
 ]
 breed[walkers walker]
 
@@ -17,6 +17,9 @@ patches-own [
   policy
   u
   active?
+
+  teleport-target-patch
+  class
 ]
 
 walkers-own [
@@ -30,18 +33,21 @@ to setup
  clear-all
  reset-ticks
 
-  set actions ["rotate-left" "rotate-right" "step-forward"] ;"up" "left" "down" "right"
+
+  set actions ["up" "left" "down" "right"]
   ask patches with [abs pxcor < max-pxcor and abs pycor < max-pycor] [
     set pcolor white
     set plabel "-1"
     set plabel-color black
     set reward -1
     set value 0
+    set class "path"
   ]
 
   ask patch (min-pxcor + 1) (max-pycor - 1) [
-    set pcolor blue
+    set pcolor red
     set plabel "IN"
+    set class "start"
     sprout-walkers 1 [
       set color magenta
       set shape "person"
@@ -54,6 +60,7 @@ to setup
     set plabel "OUT +100"
     set reward 100
     set value 100
+    set class "finish"
   ]
 
   ask patch (min-pxcor + 1) (max-pycor - 2) [
@@ -61,6 +68,7 @@ to setup
     set plabel "STOP +2"
     set reward 2
     set value 2
+    set class "stop"
   ]
 
   ask n-of volcano-number patches with [pcolor = white] [
@@ -73,16 +81,80 @@ to setup
     set plabel "-50"
     set reward -50
     set value -50
+    set class "volcano"
   ]
 
   ask n-of stone-number patches with [pcolor = white] [
     set pcolor black
+    set class "rock"
   ]
 
+  ask n-of teleports-number patches with [pcolor = white][
+    set pcolor violet
+    set class "teleport"
+    set teleport-target-patch nobody
 
+    sprout 1 [
+      set shape "pentagon"
+      set size 0.7
+      set color white
+    ]
+  ]
+
+  ask patches with [class = "teleport"][
+    if teleport-target-patch = nobody[
+    let my-target one-of patches with [class = "teleport" and teleport-target-patch = nobody]
+    set teleport-target-patch my-target
+    let me self
+    ask my-target[
+      set teleport-target-patch me
+    ]
+    ]
+  ]
+
+  ask n-of wind-number patches with [pcolor = white][
+    set class "wind"
+    set pcolor gray
+    sprout 1 [
+      set shape "arrow"
+      set size 0.7
+      set heading 90
+      set color blue
+    ]
+  ]
+
+  ask n-of barrels-number patches with [pcolor = white][
+    set class "barrel"
+    set pcolor lime
+    sprout 1 [
+      set shape "box"
+      set size 0.7
+    ]
+  ]
+
+  ask n-of frozen-number patches with [pcolor = white and count neighbors4 with [pcolor = white] = 4][
+    set class "ice-center"
+    set pcolor blue
+    ask neighbors4 [
+      set pcolor blue
+    ]
+
+    sprout 1 [
+      set shape "target"
+      set size 0.7
+    ]
+  ]
+
+  set walkable-patches patches with [class = "path" or class = "wind" or pcolor = blue or class = "teleport"]
   draw-lines
 
 
+end
+
+to set-value-zero
+  ask walkable-patches[
+    set value 0
+  ]
 end
 
 to draw-lines
@@ -146,26 +218,6 @@ to to-right
 
 end
 
-to rotate-left
-  ask walkers[
-    set heading heading - 90
-
-  ]
-end
-
-to rotate-right
-  ask walkers[
-    set heading heading + 90
-
-  ]
-end
-
-to step-forward
-  ask walkers[
-    fd 1
-  ]
-end
-
 to perform-action
 
   if ((current-action = "left") and (check-constraints (pxcor - 1) pycor) = true)
@@ -213,12 +265,12 @@ end
 
 to set-random-policy
 
-  ask patches with [pcolor = white] [
+  ask walkable-patches [
     ifelse count neighbors4 with [pcolor = green] > 0 [
       set policy towards one-of neighbors4 with [pcolor = green]
       show policy
     ][
-      set policy towards one-of neighbors4 with [pcolor = white]
+      set policy towards one-of neighbors4 with [class = "path"]
     ]
 
   ]
@@ -227,21 +279,21 @@ end
 
 to show-values
 
-  if show-value? [
-    ask patches with [pcolor = white] [
-      set plabel precision value 2
-    ]
-  ]
-
   if show-policy? [
-    ask patches with [pcolor = white] [
+    ask walkable-patches [
       set plabel policy
     ]
   ]
 
   if show-reward? [
-    ask patches with [pcolor = white] [
+    ask walkable-patches [
       set plabel reward
+    ]
+  ]
+
+  if show-value? [
+    ask walkable-patches [
+      set plabel precision value 2
     ]
   ]
 
@@ -257,35 +309,37 @@ to value-iteration
     let s -1000
     let best-action 0
     let v 0
-    ask patches with [pcolor = white] [
+    ask walkable-patches [
       set temp value
     ]
 
-    ask patches with [pcolor = white] [
-      set s -10000
+    ask walkable-patches [
+      set s -1000
       foreach actions [
         a ->
         set v 0
         set v get-value-from-action a
-        set v reward + gamma * v
+        ;set v reward + gamma * v
         if v > s [
           set policy a
           set s v
         ]
 
+      ]
+      set temp s
     ]
-    set temp s
-  ]
 
-  ask patches with [pcolor = white] [
+
+   ask walkable-patches [
       if abs (temp - value) > delta [
         set delta abs (temp - value)
-      ]
-    set value temp
+   ]
+
+   set value temp
   ]
 
-    show-values
-    output-print delta
+  show-values
+  output-print delta
     tick
   ]
 
@@ -302,9 +356,9 @@ to value-iteration-step
   ]
 
   ask patches with [pcolor = white] [
-   output-print word "Calculating value for patch" self
+    output-print word "Calculating value for patch" self
    set s -1000
-   foreach actions [
+    foreach actions [
       a ->
       set v 0
       output-print word "for action " a
@@ -316,6 +370,8 @@ to value-iteration-step
         b ->
         set v v + ((1 - main-prob) / 3 ) * (get-value-from-action b)
       ]
+
+
 
       output-print word "value is " v
       set v reward + gamma * v
@@ -354,7 +410,7 @@ to find-best-policy
 
   ask patches with [pcolor = blue][
     if count neighbors4 with [pcolor = red] = 0 [
-      ask max-one-of neighbors4 with [pcolor = white][value] [
+      ask max-one-of neighbors4 with [class = "path"][value] [
         set pcolor red
         set active? true
       ]
@@ -363,8 +419,8 @@ to find-best-policy
 
   ask patches with [active? = true][
     set active? false
-    let temp-value [value] of max-one-of neighbors4 with [pcolor = white] [value]
-     ask max-one-of neighbors4 with [pcolor = white][value] [
+    let temp-value [value] of max-one-of neighbors4 with [class = "path"] [value]
+     ask max-one-of neighbors4 with [class = "path"][value] [
       if value >= temp-value [
         set pcolor red
         set active? true
@@ -381,6 +437,9 @@ to launch-test
   let max-epoch number-iterations
   set epoch 0
   let success false
+  ask patches with [class = "finish"][
+    set value 1000
+  ]
 
   while [epoch < number-iterations][
    set success false
@@ -393,29 +452,67 @@ to launch-test
       set size 0.7
       set current-reward 0
     ]
-   ]
+  ]
 
-   while [success != true] [
+    while [success != true] [
       ask walkers [
         let temp-value [value] of max-one-of neighbors4 [value]
-         ifelse random-float 1 < main-prob [
+
+        ifelse random-float 1 < main-prob [
           set heading towards one-of neighbors4 with [value = temp-value]
         ][
 
           set heading towards one-of neighbors4 with [pcolor != black]
         ]
 
-        if random-float 1 < (count neighbors4 with [pcolor = pink]) * prob-fall [
-          set heading towards one-of neighbors4 with [pcolor = pink]
-          set success true
+        let volcano-probability (count neighbors4 with [class = "volcano"]) * prob-fall
+
+        if random-float 1 < volcano-probability [
+          set heading towards one-of neighbors4 with [class = "volcano"]
+          set success true ;restart
           set try-number try-number + 1
           set total-reward total-reward + current-reward
+        ]
 
+        ;ice
+        if [pcolor] of patch-ahead 1 = blue and [pcolor] of patch-here = blue[
+          let slip-probability (1 - volcano-probability - steady-ice-probability)
+          show "Slip probability:"
+          show slip-probability
+
+          if random-float (1 - volcano-probability) < slip-probability [
+            show "Slipping on ice"
+
+            let slip-patch nobody
+            ask patch-here[
+              let center-patch one-of patches in-radius 1 with [class = "ice-center"]
+              let ice-patches other patches with [pcolor = blue and distance center-patch = 1]
+              set slip-patch one-of ice-patches
+            ]
+
+            setxy [pxcor] of slip-patch [pycor] of slip-patch
+          ]
         ]
 
         fd 1
+
+        ;teleports
+        if [class] of patch-here = "teleport"[
+          show "Teleporting"
+          let teleport-endpoint [teleport-target-patch] of patch-here
+          setxy ([pxcor] of teleport-endpoint + 1) ([pycor] of teleport-endpoint)
+        ]
+
+        ;wind
+        if [class] of patch-here = "wind"[
+          if random-float (1 - volcano-probability) < wind-glide-probability[
+            show "Gliding on wind"
+            setxy ([pxcor] of patch-here - 1) [pycor] of patch-here
+          ]
+        ]
+
         wait(0.2)
-          set current-reward current-reward + reward
+        set current-reward current-reward + reward
 
       if [pcolor] of patch-here = green [
           set total-reward total-reward + current-reward
@@ -423,123 +520,101 @@ to launch-test
           set success-number success-number + 1
           set try-number try-number + 1
           set success true]
+      ]
+      tick
     ]
-   ]
-
-
-
-
   ]
 
 end
 
+to-report compute-patch-value [current-patch target-patch volcano-probability] ;processes the added obstacles
+  ;teleports
+  if [class] of current-patch = "teleport"[
+    let spawn-point patch ([pxcor] of teleport-target-patch + 1) ([pycor] of teleport-target-patch )
+    let target-value (1 - volcano-probability) * ([value] of spawn-point + gamma * ([reward] of spawn-point + teleportation-cost))
+    report target-value
+  ]
+
+  ;wind areas
+  if [class] of current-patch = "wind"[
+    let normal-value (1 - volcano-probability - wind-glide-probability) * ([value] of target-patch + gamma * [reward] of target-patch)
+
+    let target-value 0
+    let push-destination-patch patch (pxcor + 1)(pycor)
+    set target-value wind-glide-probability * ([value] of push-destination-patch + gamma * [reward] of push-destination-patch)
+    report target-value + normal-value
+  ]
+
+  ;ice areas
+  if [pcolor] of current-patch = blue and [pcolor] of target-patch = blue[
+    let normal-value steady-ice-probability * ([value] of target-patch + gamma * [reward] of target-patch)
+
+    let center-patch one-of patches in-radius 1 with [class = "ice-center"]
+    let ice-patches other patches with [pcolor = blue and distance center-patch = 1]
+
+    let value-sum 0
+
+    ask ice-patches[
+      set value-sum value-sum + (value + gamma * reward)
+    ]
+
+    let slippery-value (1 - steady-ice-probability - volcano-probability) / 4 * (value-sum)
+
+    report normal-value + slippery-value
+  ]
+
+  ;simple step
+  report (1 - volcano-probability) * ([value] of target-patch + gamma * [reward] of target-patch)
+
+end
 
 to-report get-value-from-action [action]
 
-  let temp-value 0
+  let volcano-value-component 0
+  let volcano-probability 0
 
-  if count neighbors4 with [pcolor = pink] > 0 [
-
-    set temp-value (count neighbors4 with [pcolor = pink]) * prob-fall * (-50)
-   ;  output-print "Volcano fall value"
-  ;  output-print temp-value
+  if count neighbors4 with [class = "volcano"] > 0 [
+    set volcano-probability (count neighbors4 with [pcolor = pink]) * prob-fall
+    set volcano-value-component volcano-probability * (-50) * gamma
   ]
 
-  let  walker-heading 0
-  ask walkers [
-    set  walker-heading heading
-  ]
-
-  if action = "rotate-left"[
-    let target-heading walker-heading - 90
-
-    let weighed-value 0
-    ask walkers [
-      set weighed-value ([value] of patch-at-heading-and-distance target-heading 1) * 0.5
-      set weighed-value weighed-value + ([value] of patch-at-heading-and-distance (target-heading - 90) 1) * 0.2
-      set weighed-value weighed-value + ([value] of patch-at-heading-and-distance (target-heading + 90) 1) * 0.2
-      set weighed-value weighed-value + ([value] of patch-at-heading-and-distance (target-heading + 180) 1) * 0.1
-    ]
-
-    report (1 - (count neighbors4 with [pcolor = pink]) * prob-fall) * (weighed-value) + temp-value
-  ]
-
-  if action = "rotate-right"[
-    let target-heading walker-heading + 90
-
-    let weighed-value 0
-    ask walkers [
-      set weighed-value ([value] of patch-at-heading-and-distance target-heading 1) * 0.5
-      set weighed-value weighed-value + ([value] of patch-at-heading-and-distance (target-heading - 90) 1) * 0.2
-      set weighed-value weighed-value + ([value] of patch-at-heading-and-distance (target-heading + 90) 1) * 0.2
-      set weighed-value weighed-value + ([value] of patch-at-heading-and-distance (target-heading + 180) 1) * 0.1
-    ]
-
-    report (1 - (count neighbors4 with [pcolor = pink]) * prob-fall) * (weighed-value) + temp-value
-  ]
-
-  if action = "step-forward" [
-    let value-ahead 0
-    ask walkers[
-      set value-ahead [value] of patch-ahead 1
-    ]
-
-    report (1 - (count neighbors4 with [pcolor = pink]) * prob-fall) * (value-ahead) + temp-value
-  ]
+  let me self
+  let num-distant-barrels count patches with [class = "barrel" and (distance me) = 2]
+  let num-close-barrels count patches with [class = "barrel" and (distance me) = 1]
+  let poison-effect (num-close-barrels * (-100) * 0.25 + num-distant-barrels * (-100) * 0.1) * gamma
 
   if ((action = "left") and (check-constraints (pxcor - 1) pycor) = true)
   [
+    let target-patch patch (pxcor - 1) pycor
 
-    ifelse temp-value != 0 [
-    report (1 - (count neighbors4 with [pcolor = pink]) * prob-fall) * ([value] of patch (pxcor - 1) pycor) + temp-value
-    ][
-    report [value] of patch (pxcor - 1) pycor
-    ]
-   ]
+    ;report (1 - volcano-probability) * ([value] of target-patch + gamma * [reward] of target-patch) + volcano-value-component + poison-effect ;no need to include the probability of getting poisoned in the formula as getting poisoned does not get the agent into a different state
+    report (compute-patch-value self target-patch volcano-probability ) + volcano-value-component + poison-effect ;no need to include the probability of getting poisoned in the formula as getting poisoned does not get the agent into a different state
+  ]
 
   if ((action = "right") and (check-constraints (pxcor + 1) pycor))
   [
-    ifelse temp-value !=  0 [
-    report (1 - (count neighbors4 with [pcolor = pink]) * prob-fall) * ([value] of patch (pxcor + 1) pycor) + temp-value
-    ][
-    report [value] of patch (pxcor + 1) pycor
-    ]
-   ]
+    let target-patch patch (pxcor + 1) pycor
+
+    ;report (1 - volcano-probability) * ([value] of target-patch + gamma * [reward] of target-patch) + volcano-value-component + poison-effect ;no need to include the probability of getting poisoned in the formula as getting poisoned does not get the agent into a different state
+    report (compute-patch-value self target-patch volcano-probability ) + volcano-value-component + poison-effect ;no need to include the probability of getting poisoned in the formula as getting poisoned does not get the agent into a different state
+  ]
+
   if ((action = "up") and (check-constraints pxcor  (pycor + 1)))
   [
-   ifelse temp-value !=  0 [
-    report (1 - (count neighbors4 with [pcolor = pink]) * prob-fall) * ([value] of patch pxcor (pycor + 1)) + temp-value
-    ][
-    report [value] of patch pxcor (pycor + 1)
-    ]
-
-
-   ]
+    let target-patch patch pxcor (pycor + 1)
+    ;report (1 - volcano-probability) * ([value] of target-patch + gamma * [reward] of target-patch) + volcano-value-component + poison-effect ;no need to include the probability of getting poisoned in the formula as getting poisoned does not get the agent into a different state
+    report (compute-patch-value self target-patch volcano-probability ) + volcano-value-component + poison-effect ;no need to include the probability of getting poisoned in the formula as getting poisoned does not get the agent into a different state
+  ]
 
   if ((action = "down") and (check-constraints pxcor  (pycor - 1)))
   [
-    ifelse temp-value !=  0 [
-    report (1 - (count neighbors4 with [pcolor = pink]) * prob-fall) * ([value] of patch pxcor (pycor - 1)) + temp-value
-    ][
-    report [value] of patch pxcor (pycor - 1)
-    ]
-
-
-   ]
-
-  ifelse temp-value !=  0 [
-    report (1 - (count neighbors4 with [pcolor = pink]) * prob-fall) * (value) + temp-value
-    ][
-    report value
-    ]
-
-end
-
-
-to set-value-zero
-  ask patches with [pcolor = white][
-    set value 0
+    let target-patch patch pxcor (pycor - 1)
+    ;report (1 - volcano-probability) * ([value] of target-patch + gamma * [reward] of target-patch) + volcano-value-component + poison-effect ;no need to include the probability of getting poisoned in the formula as getting poisoned does not get the agent into a different state
+    report (compute-patch-value self target-patch volcano-probability ) + volcano-value-component + poison-effect ;no need to include the probability of getting poisoned in the formula as getting poisoned does not get the agent into a different state
   ]
+
+  report (1 - volcano-probability) * (value * gamma * reward) + volcano-value-component + poison-effect ;no need to include the probability of getting poisoned in the formula as getting poisoned does not get the agent into a different state
+
 end
 
 to clear-values
@@ -552,13 +627,13 @@ to Q-learning
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
-244
-10
-649
-416
+329
+2
+1121
+795
 -1
 -1
-36.1
+37.33333333333334
 1
 10
 1
@@ -568,10 +643,10 @@ GRAPHICS-WINDOW
 0
 0
 1
--5
-5
--5
-5
+-10
+10
+-10
+10
 0
 0
 1
@@ -604,7 +679,7 @@ volcano-number
 volcano-number
 0
 10
-6.0
+10.0
 1
 1
 NIL
@@ -619,17 +694,17 @@ stone-number
 stone-number
 0
 5
-3.0
+5.0
 1
 1
 NIL
 HORIZONTAL
 
 BUTTON
-403
-449
-466
-482
+1690
+615
+1753
+648
 NIL
 up
 NIL
@@ -643,10 +718,10 @@ NIL
 1
 
 BUTTON
-404
-529
-469
-562
+1691
+695
+1756
+728
 NIL
 down
 NIL
@@ -660,10 +735,10 @@ NIL
 1
 
 BUTTON
-471
-487
-552
-520
+1758
+653
+1839
+686
 NIL
 to-right
 NIL
@@ -677,10 +752,10 @@ NIL
 1
 
 BUTTON
-327
-489
-398
-522
+1614
+655
+1685
+688
 NIL
 to-left
 NIL
@@ -694,10 +769,10 @@ NIL
 1
 
 MONITOR
-1025
-284
-1128
-329
+1598
+274
+1701
+319
 Avrage reward
 total-reward / try-number
 2
@@ -705,10 +780,10 @@ total-reward / try-number
 11
 
 MONITOR
-953
-227
-1062
-272
+1526
+217
+1635
+262
 current-reward
 [current-reward] of one-of walkers
 17
@@ -716,25 +791,25 @@ current-reward
 11
 
 SLIDER
-57
-213
-229
-246
+1413
+540
+1585
+573
 gamma
 gamma
 0
 1
-0.95
+0.7
 0.01
 1
 NIL
 HORIZONTAL
 
 SWITCH
-59
-350
-193
-383
+1582
+363
+1716
+396
 show-value?
 show-value?
 0
@@ -742,10 +817,10 @@ show-value?
 -1000
 
 BUTTON
-39
-487
-160
-520
+1625
+507
+1746
+540
 NIL
 show-values
 NIL
@@ -759,10 +834,10 @@ NIL
 1
 
 SWITCH
-58
-391
-197
-424
+1581
+404
+1720
+437
 show-policy?
 show-policy?
 1
@@ -770,10 +845,10 @@ show-policy?
 -1000
 
 BUTTON
-40
-535
-189
-568
+1626
+555
+1775
+588
 NIL
 set-random-policy
 NIL
@@ -787,10 +862,10 @@ NIL
 1
 
 SWITCH
-60
-431
-204
-464
+1583
+444
+1727
+477
 show-reward?
 show-reward?
 1
@@ -798,10 +873,10 @@ show-reward?
 -1000
 
 BUTTON
-682
-35
-838
-68
+1255
+25
+1411
+58
 NIL
 value-iteration-step
 NIL
@@ -815,32 +890,32 @@ NIL
 1
 
 OUTPUT
-879
-26
-1213
-212
+1452
+16
+1786
+202
 13
 
 SLIDER
-680
-115
-852
-148
+55
+546
+227
+579
 prob-fall
 prob-fall
 0
 1
-0.15
+0.05
 0.01
 1
 NIL
 HORIZONTAL
 
 BUTTON
-682
-161
-815
-194
+1255
+151
+1388
+184
 NIL
 find-best-policy
 NIL
@@ -854,25 +929,25 @@ NIL
 1
 
 SLIDER
-62
-262
-234
-295
+1418
+589
+1590
+622
 epsilon
 epsilon
 0
 0.5
-0.07
+0.08
 0.01
 1
 NIL
 HORIZONTAL
 
 BUTTON
-682
-75
-805
-108
+1255
+65
+1378
+98
 NIL
 value-iteration
 NIL
@@ -886,10 +961,10 @@ NIL
 1
 
 BUTTON
-681
-275
-784
-308
+1254
+265
+1357
+298
 NIL
 launch-test
 NIL
@@ -903,21 +978,21 @@ NIL
 1
 
 INPUTBOX
-679
-201
-828
-261
+1252
+191
+1401
+251
 number-iterations
-100.0
+10.0
 1
 0
 Number
 
 PLOT
-671
-323
-871
-473
+1244
+313
+1444
+463
 plot 1
 NIL
 NIL
@@ -932,10 +1007,10 @@ PENS
 "default" 1.0 0 -16777216 true "" "plot delta"
 
 BUTTON
-177
-491
-301
-524
+1763
+511
+1887
+544
 NIL
 set-value-zero
 NIL
@@ -949,10 +1024,10 @@ NIL
 1
 
 MONITOR
-912
-285
-1018
-330
+1485
+275
+1591
+320
 success ratio %
 success-number / try-number * 100
 2
@@ -960,10 +1035,10 @@ success-number / try-number * 100
 11
 
 BUTTON
-680
-503
-780
-536
+1253
+493
+1353
+526
 NIL
 Q-learning
 NIL
@@ -977,10 +1052,10 @@ NIL
 1
 
 MONITOR
-930
-366
-987
-411
+1503
+356
+1560
+401
 NIL
 epoch
 17
@@ -988,10 +1063,10 @@ epoch
 11
 
 SLIDER
-840
-507
-1012
-540
+1413
+497
+1585
+530
 main-prob
 main-prob
 0
@@ -1003,10 +1078,10 @@ NIL
 HORIZONTAL
 
 BUTTON
-204
-548
-312
-581
+1790
+568
+1898
+601
 NIL
 clear-values\n
 NIL
@@ -1018,6 +1093,111 @@ NIL
 NIL
 NIL
 1
+
+SLIDER
+55
+183
+228
+216
+teleports-number
+teleports-number
+0
+16
+2.0
+2
+1
+NIL
+HORIZONTAL
+
+SLIDER
+56
+232
+228
+265
+wind-number
+wind-number
+0
+5
+5.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+57
+276
+229
+309
+barrels-number
+barrels-number
+0
+10
+7.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+56
+327
+228
+360
+frozen-number
+frozen-number
+0
+7
+4.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+56
+399
+248
+432
+teleportation-cost
+teleportation-cost
+-100
+-1
+-1.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+56
+453
+268
+486
+wind-glide-probability
+wind-glide-probability
+0
+1
+0.6
+0.01
+1
+NIL
+HORIZONTAL
+
+SLIDER
+54
+502
+269
+535
+steady-ice-probability
+steady-ice-probability
+0
+1
+0.5
+0.01
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
